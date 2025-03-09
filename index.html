@@ -1,0 +1,217 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <title>ESP32 PirateBox</title>
+    <style>
+        body { 
+            font-family: Arial, sans-serif; 
+            text-align: center; 
+            background-color: #2b2f33; 
+            color: #a0a5aa; 
+        }
+
+        #chat {
+            height: 300px; 
+            overflow-y: scroll; 
+            border: 2px solid #ff6600; 
+            padding: 10px; 
+            background: radial-gradient(circle, #ff6600 5%, #1a1a1a 80%);
+            color: #ffcc99; 
+            font-family: "Courier New", Courier, monospace;
+            box-shadow: 0 0 15px #ff6600;
+            animation: crt-glow 1.5s infinite alternate;
+            position: relative;
+        }
+
+        @keyframes crt-glow {
+            0% { box-shadow: 0 0 5px #ff6600; }
+            100% { box-shadow: 0 0 15px #ff3300; }
+        }
+
+        #chat::before {
+            content: "";
+            position: absolute;
+            top: 0; left: 0; right: 0; bottom: 0;
+            background: url('data:image/svg+xml;utf8,<svg xmlns="http://www.w3.org/2000/svg" width="100%" height="100%" ><filter id="noiseFilter"><feTurbulence type="fractalNoise" baseFrequency="0.5" numOctaves="3" stitchTiles="stitch"/></filter><rect width="100%" height="100%" filter="url(#noiseFilter)" opacity="0.05"/></svg>');
+            z-index: 0;
+            pointer-events: none;
+        }
+
+        #file-list { 
+            margin-top: 20px; 
+        }
+
+        .upload-btn { 
+            margin-top: 10px; 
+        }
+
+        h1, h2 { 
+            color: #ff6600; 
+        }
+
+        input, button { 
+            background: #444; 
+            color: #ff9933; 
+            border: 1px solid #ff6600; 
+            padding: 5px 10px; 
+        }
+
+        input::placeholder {
+            color: #ff9933;
+        }
+
+        button:hover {
+            background: #ff6600;
+            color: #000;
+        }
+
+        @keyframes decode {
+            0% { opacity: 0; }
+            100% { opacity: 1; }
+        }
+
+        /* Dropdown for message duration */
+        #duration-select {
+            background: #444;
+            color: #ff9933;
+            border: 1px solid #ff6600;
+            padding: 5px 10px;
+            margin-top: 10px;
+        }
+    </style>
+</head>
+<body>
+    <h1>ESP32 PirateBox</h1>
+
+    <div>
+        <svg width="100" height="100" viewBox="0 0 64 64" xmlns="http://www.w3.org/2000/svg">
+            <circle cx="32" cy="32" r="30" stroke="#ff6600" stroke-width="4" fill="none" />
+            <line x1="32" y1="10" x2="32" y2="54" stroke="#ff6600" stroke-width="4" />
+            <line x1="10" y1="32" x2="54" y2="32" stroke="#ff6600" stroke-width="4" />
+        </svg>
+    </div>
+
+    <h2>Chat</h2>
+    <input type="text" id="nameInput" placeholder="Enter your name...">
+    <div id="chat"></div>
+    <input type="text" id="chatInput" placeholder="Type a message..." oninput="typingEffect(this)">
+    <button onclick="sendMessage()">Send</button>
+
+    <label for="duration-select">Select Message Duration:</label>
+    <select id="duration-select" onchange="updateMessageDuration(this)">
+        <option value="10000">10 seconds</option>
+        <option value="30000">30 seconds</option>
+        <option value="60000">1 minute</option>
+        <option value="180000">3 minutes</option>
+        <option value="300000">5 minutes</option>
+        <option value="600000">10 minutes</option>
+        <option value="1800000">30 minutes</option>
+        <option value="3600000">1 hour</option>
+        <option value="10800000">3 hours</option>
+        <option value="28800000">8 hours</option>
+        <option value="43200000">12 hours</option>
+        <option value="86400000">24 hours</option>
+        <option value="-1">Never (message stays visible)</option>
+    </select>
+
+    <h2>Upload a File</h2>
+    <input type="file" id="fileInput">
+    <button class="upload-btn" onclick="uploadFile()">Upload</button>
+
+    <h2>Available Files</h2>
+    <div id="file-list"></div>
+
+    <script>
+        let files = JSON.parse(localStorage.getItem('files')) || {};
+        let chatHistory = JSON.parse(localStorage.getItem('chatHistory')) || [];
+        let messageDuration = 10000; // Default message visibility duration (10 seconds)
+
+        function sendMessage() {
+            const chat = document.getElementById('chat');
+            const input = document.getElementById('chatInput');
+            const name = document.getElementById('nameInput').value || 'Anonymous';
+            if (input.value) {
+                const message = { name, text: input.value, timestamp: Date.now() };
+                chatHistory.push(message);
+                localStorage.setItem('chatHistory', JSON.stringify(chatHistory)); // Update localStorage
+                displayEncodedMessage(chat, message);
+                input.value = '';
+                autoScroll(chat);
+            }
+        }
+
+        function displayEncodedMessage(chat, message) {
+            const msgDiv = document.createElement('div');
+            chat.appendChild(msgDiv);
+            const encodedMessage = scrambleText(message.text);
+            msgDiv.innerHTML = `<strong>${message.name}:</strong> ${encodedMessage}`;
+            setTimeout(() => decodeMessage(msgDiv, message), 1000);
+        }
+
+        function scrambleText(text) {
+            return text.split('').map(char => {
+                return String.fromCharCode(33 + Math.random() * 94);
+            }).join('');
+        }
+
+        function decodeMessage(msgDiv, message) {
+            let decodedMessage = message.text;
+            let decodedIndex = 0;
+            let scrambledMessage = msgDiv.innerHTML.split(' ');
+
+            function updateMessage() {
+                if (decodedIndex < decodedMessage.length) {
+                    scrambledMessage[1] = scrambledMessage[1].substr(0, decodedIndex) + decodedMessage[decodedIndex];
+                    msgDiv.innerHTML = `<strong>${message.name}:</strong> ${scrambledMessage[1]}`;
+                    decodedIndex++;
+                    setTimeout(updateMessage, Math.random() * 100 + 50);
+                } else {
+                    setTimeout(() => msgDiv.style.animation = 'decode 1s ease-out', 1000);
+                    setTimeout(() => removeMessage(msgDiv), messageDuration); // Remove message after duration
+                }
+            }
+
+            updateMessage();
+        }
+
+        function updateChat() {
+            const chat = document.getElementById('chat');
+            const atBottom = chat.scrollTop + chat.clientHeight >= chat.scrollHeight - 10;
+            chat.innerHTML = '';
+            chatHistory.forEach(message => displayEncodedMessage(chat, message));
+            if (atBottom) autoScroll(chat);
+        }
+
+        function autoScroll(chat) {
+            chat.scrollTop = chat.scrollHeight;
+        }
+
+        function removeMessage(msgDiv) {
+            if (messageDuration !== -1) { // Don't remove if it's set to 'Never'
+                chatHistory.shift();
+                localStorage.setItem('chatHistory', JSON.stringify(chatHistory));
+                msgDiv.remove();
+            }
+        }
+
+        function updateMessageDuration(select) {
+            messageDuration = parseInt(select.value); // Update message visibility duration
+        }
+
+        function typingEffect(input) {
+            input.style.animation = "crt-glow 0.5s infinite alternate";
+            setTimeout(() => input.style.animation = "", 500);
+        }
+
+        window.addEventListener('storage', (event) => {
+            if (event.key === 'chatHistory') {
+                chatHistory = JSON.parse(event.newValue);
+                updateChat();
+            }
+        });
+
+        updateChat(); // Initialize chat display
+    </script>
+</body>
+</html>
